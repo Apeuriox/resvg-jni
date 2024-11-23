@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="resvg-jni-0.1.1:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/resvg_jni_0_1_1_jar</output-path>
+    <root id="archive" name="resvg-jni-0.1.1.jar">
+      <element id="module-output" name="resvg-jni-0.1.1" />
+    </root>
+  </artifact>
+</component>

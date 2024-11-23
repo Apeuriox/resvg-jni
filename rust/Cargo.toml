@@ -1,0 +1,15 @@
+[package]
+name = "resvg-jni"
+version = "0.1.1"
+edition = "2021"
+
+[lib]
+name = "resvg_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0.93"
+resvg = { version = "0.44.0" }
+roxmltree = "0.20.0"
+jni = {version = "0.19"}
+jni_fn = "0.1.2"
