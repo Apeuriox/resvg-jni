@@ -20,7 +20,11 @@ public class ResvgJNI
             } else {
                 throw new UnsupportedOperationException("Unsupported OS: " + osName);
             }
-            tempDir = Files.createTempDirectory("rust_libs");
+            String workingDir = System.getenv("RESVG_DIR");
+            if (workingDir == null || workingDir.isEmpty()) {
+                workingDir = String.valueOf(Files.createTempDirectory("rust_libs"));
+            }
+            tempDir = Path.of(workingDir);
             tempDir.toFile().deleteOnExit();
 
             Path tempLib = tempDir.resolve(libraryName);
