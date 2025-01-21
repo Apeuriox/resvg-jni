@@ -4,9 +4,11 @@ import java.lang.ref.Cleaner;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 
 public class ResvgJNI
 {
+    private static final Path tempDir;
     static {
         try {
             String osName = System.getProperty("os.name").toLowerCase();
@@ -18,7 +20,7 @@ public class ResvgJNI
             } else {
                 throw new UnsupportedOperationException("Unsupported OS: " + osName);
             }
-            Path tempDir = Files.createTempDirectory("rust_libs");
+            tempDir = Files.createTempDirectory("rust_libs");
             tempDir.toFile().deleteOnExit();
 
             Path tempLib = tempDir.resolve(libraryName);
@@ -29,6 +31,16 @@ public class ResvgJNI
                 Files.copy(in, tempLib, StandardCopyOption.REPLACE_EXISTING);
             }
             System.load(tempLib.toAbsolutePath().toString());
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    Files.walk(tempDir)
+                            .sorted(Comparator.reverseOrder())
+                            .map(Path::toFile)
+                            .forEach(File::delete);
+                } catch (IOException e) {
+                    e.printStackTrace(); // 或记录日志
+                }
+            }));
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to load the native library", e);
