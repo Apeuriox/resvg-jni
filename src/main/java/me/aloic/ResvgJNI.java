@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 
-class ResvgJNI {
+public class ResvgJNI {
     private static final Path tempDir;
     static {
         try {
