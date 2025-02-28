@@ -2,6 +2,7 @@ mod error;
 mod render;
 mod render_option;
 
+use jni::objects::AsJArrayRaw;
 use render_option::RenderOptions;
 
 use jni::sys::jbyteArray;
@@ -76,50 +77,37 @@ macro_rules! load_ptr {
     }};
 }
 
-#[macro_export]
-macro_rules! catch_panic {
-    ( $x:expr, $on_fail:expr ) => {
-        match std::panic::catch_unwind(|| {
-            $x
-        }) {
-            Ok(r) => r,
-            Err(_) => {
-                $on_fail
-            }
-        }
-    };
-}
 
 
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsNew(env: JNIEnv, _class: JClass, resources_dir: JString) -> jlong {
-    let resources_dir: String = trythrow!(env, env.get_string(resources_dir)).into();
+pub fn RenderOptionsNew(mut env: JNIEnv, _class: JClass, resources_dir: JString) -> jlong {
+    let resources_dir: String = trythrow!(env, env.get_string(&resources_dir)).into();
     let opt = RenderOptions::new(resources_dir);
     Box::into_raw(Box::new(opt)) as jlong
 }
 
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsLoadSystemFonts(env: JNIEnv, _class: JClass, ptr: jlong) {
+pub fn RenderOptionsLoadSystemFonts(mut env: JNIEnv, _class: JClass, ptr: jlong) {
     let opt = load_ptr!(env, RenderOptions, ptr);
     opt.load_system_fonts();
 }
 
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsLoadFont(env: JNIEnv, _class: JClass, ptr: jlong, path: JString) {
+pub fn RenderOptionsLoadFont(mut env: JNIEnv, _class: JClass, ptr: jlong, path: JString) {
     let opt = load_ptr!(env, RenderOptions, ptr);
-    let path: String = trythrow!(env, env.get_string(path)).into();
+    let path: String = trythrow!(env, env.get_string(&path)).into();
     opt.try_load_font(&path);
 }
 
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsLoadFontsDir(env: JNIEnv, _class: JClass, ptr: jlong, path: JString) {
+pub fn RenderOptionsLoadFontsDir(mut env: JNIEnv, _class: JClass, ptr: jlong, path: JString) {
     let opt = load_ptr!(env, RenderOptions, ptr);
-    let path: String = trythrow!(env, env.get_string(path)).into();
+    let path: String = trythrow!(env, env.get_string(&path)).into();
     opt.load_fonts_dir(&path);
 }
 
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsSetShapeRendering(env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
+pub fn RenderOptionsSetShapeRendering(mut env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
     let opt = load_ptr!(env, RenderOptions, ptr);
 
     let t = match render_type {
@@ -132,7 +120,7 @@ pub fn RenderOptionsSetShapeRendering(env: JNIEnv, _class: JClass, ptr: jlong, r
     opt.shape_rendering = t;
 }
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsSetTextRendering(env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
+pub fn RenderOptionsSetTextRendering(mut env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
     let opt = load_ptr!(env, RenderOptions, ptr);
 
     let t = match render_type {
@@ -145,7 +133,7 @@ pub fn RenderOptionsSetTextRendering(env: JNIEnv, _class: JClass, ptr: jlong, re
     opt.text_rendering = t;
 }
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn RenderOptionsSetImageRendering(env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
+pub fn RenderOptionsSetImageRendering(mut env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
     let opt = load_ptr!(env, RenderOptions, ptr);
 
     let t = match render_type {
@@ -164,23 +152,48 @@ pub fn RenderOptionsDestroy(_env: JNIEnv, _class: JClass, ptr: jlong) {
 
 #[jni_fn("me.aloic.ResvgJNI")]
 pub fn convertToPNG(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
     options_ptr: jlong,
     svg_data: JString, // SVG 数据（强制必须UTF-8）
     scale: jfloat,
 ) -> jbyteArray {
-    catch_panic!(
-        {
-            let scale = if scale <= 0f32 { 1.0 } else { scale };
-            let opt = load_ptr!(env, RenderOptions, options_ptr, std::ptr::null_mut());
-            let svg_content: String = trythrow!(env, env.get_string(svg_data), std::ptr::null_mut()).into();
-            let png_data = trythrow!(env, render::render(&svg_content, &opt.get_options(), scale), std::ptr::null_mut());
-            trythrow!(env, env.byte_array_from_slice(&png_data), std::ptr::null_mut())
-        },
-        {
-            let _ = env.throw("Unexpected Error");
+    let mut envc = unsafe { env.unsafe_clone() };
+    match std::panic::catch_unwind(move || {
+        let scale = if scale <= 0f32 { 1.0 } else { scale };
+        let opt = load_ptr!(env, RenderOptions, options_ptr, std::ptr::null_mut());
+        let svg_content: String = trythrow!(env, env.get_string(&svg_data), std::ptr::null_mut()).into();
+        let png_data = trythrow!(env, render::render(&svg_content, &opt.get_options(), scale, render::RenderType::Png), std::ptr::null_mut());
+        trythrow!(env, env.byte_array_from_slice(&png_data).map(|d| d.as_jarray_raw()), std::ptr::null_mut())
+    }) {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = envc.throw("Unexpected Error");
             std::ptr::null_mut()
         }
-    )
+    }
+}
+
+#[jni_fn("me.aloic.ResvgJNI")]
+pub fn convertToJPG(
+    mut env: JNIEnv,
+    _class: JClass,
+    options_ptr: jlong,
+    svg_data: JString, // SVG 数据（强制必须UTF-8）
+    scale: jfloat,
+) -> jbyteArray {
+    let mut envc = unsafe { env.unsafe_clone() };
+    match std::panic::catch_unwind(move || {
+        let scale = if scale <= 0f32 { 1.0 } else { scale };
+        let opt = load_ptr!(env, RenderOptions, options_ptr, std::ptr::null_mut());
+        let svg_content: String = trythrow!(env, env.get_string(&svg_data), std::ptr::null_mut()).into();
+        let png_data = trythrow!(env, render::render(&svg_content, &opt.get_options(), scale, render::RenderType::Jpeg), std::ptr::null_mut());
+        trythrow!(env, env.byte_array_from_slice(&png_data).map(|d| d.as_jarray_raw()), std::ptr::null_mut())
+    }) {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = envc.throw("Unexpected Error");
+            std::ptr::null_mut()
+        }
+    }
 }

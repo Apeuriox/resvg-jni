@@ -1,4 +1,5 @@
 package me.aloic;
+
 import java.io.*;
 import java.lang.ref.Cleaner;
 import java.nio.file.Files;
@@ -6,8 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 
-public class ResvgJNI
-{
+class ResvgJNI {
     private static final Path tempDir;
     static {
         try {
@@ -50,6 +50,7 @@ public class ResvgJNI
             throw new RuntimeException("Failed to load the native library", e);
         }
     }
+
     private static native long RenderOptionsNew(String resourcePath);
     /// 0: OptimizeSpeed
     /// 1: CrispEdges
@@ -67,6 +68,7 @@ public class ResvgJNI
     private static native void RenderOptionsLoadFontsDir(long ptr, String fontDirPath);
     private static native void RenderOptionsDestroy(long ptr);
     private static native byte[] convertToPNG(long optionsPtr, String svgData, float scale);
+    private static native byte[] convertToJPG(long optionsPtr, String svgData, float scale);
 
     public static class Renderer {
         private RenderOptions options;
@@ -83,8 +85,7 @@ public class ResvgJNI
             return RenderPng(svgData, 1.0f);
         }
 
-        public byte[] RenderPng(InputStream svgInputStream, float scale) throws IOException
-        {
+        public byte[] RenderPng(InputStream svgInputStream, float scale) throws IOException {
             String svgData = readInputStreamToString(svgInputStream);
             return RenderPng(svgData, scale);
         }
@@ -100,6 +101,32 @@ public class ResvgJNI
 
         public void RenderPng(InputStream svgInputStream, OutputStream pngOutputStream) throws IOException {
             RenderPng(svgInputStream, pngOutputStream, 1.0f);
+        }
+
+        public byte[] RenderJpg(String svgData, float scale) {
+            return convertToJPG(options.GetContext(), svgData, scale);
+        }
+
+        public byte[] RenderJpg(String svgData) {
+            return RenderJpg(svgData, 1.0f);
+        }
+
+        public byte[] RenderJpg(InputStream svgInputStream, float scale) throws IOException {
+            String svgData = readInputStreamToString(svgInputStream);
+            return RenderJpg(svgData, scale);
+        }
+
+        public byte[] RenderJpg(InputStream svgInputStream) throws IOException {
+            return RenderJpg(svgInputStream, 1.0f);
+        }
+
+        public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream, float scale) throws IOException {
+            byte[] JpgData = RenderJpg(svgInputStream, scale);
+            JpgOutputStream.write(JpgData);
+        }
+
+        public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream) throws IOException {
+            RenderJpg(svgInputStream, JpgOutputStream, 1.0f);
         }
 
         // 工具方法：将 InputStream 转换为字符串
@@ -161,5 +188,4 @@ public class ResvgJNI
             }
         }
     }
-
 }
