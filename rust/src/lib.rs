@@ -49,35 +49,35 @@ macro_rules! destory {
     };
 }
 
+/// Shared borrow of the native object. Callers mutate through its lock.
+/// A mutable borrow here would alias across overlapping renders.
 #[macro_export]
 macro_rules! load_ptr {
     ( $env:ident, $type:ident, $ptr:ident, $fail_rtn:expr ) => {{
-        let ptr = $ptr as *mut $type;
-        let option_mut_ref = unsafe { ptr.as_mut() };
-        let Some(mut_ref) = option_mut_ref else {
+        let ptr = $ptr as *const $type;
+        let option_ref = unsafe { ptr.as_ref() };
+        let Some(shared) = option_ref else {
             let _ = $env.throw_new(
                 "java/lang/NullPointerException",
                 concat!(stringify!($type), " cannot be null"),
             );
             return $fail_rtn;
         };
-        mut_ref
+        shared
     }};
     ( $env:ident, $type:ident, $ptr:ident ) => {{
-        let ptr = $ptr as *mut $type;
-        let option_mut_ref = unsafe { ptr.as_mut() };
-        let Some(mut_ref) = option_mut_ref else {
+        let ptr = $ptr as *const $type;
+        let option_ref = unsafe { ptr.as_ref() };
+        let Some(shared) = option_ref else {
             let _ = $env.throw_new(
                 "java/lang/NullPointerException",
                 concat!(stringify!($type), " cannot be null"),
             );
             return Default::default();
         };
-        mut_ref
+        shared
     }};
 }
-
-
 
 #[jni_fn("me.aloic.ResvgJNI")]
 pub fn RenderOptionsNew(mut env: JNIEnv, _class: JClass, resources_dir: JString) -> jlong {
@@ -117,7 +117,7 @@ pub fn RenderOptionsSetShapeRendering(mut env: JNIEnv, _class: JClass, ptr: jlon
         _ => return,
     };
 
-    opt.shape_rendering = t;
+    opt.set_shape_rendering(t);
 }
 #[jni_fn("me.aloic.ResvgJNI")]
 pub fn RenderOptionsSetTextRendering(mut env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
@@ -130,7 +130,7 @@ pub fn RenderOptionsSetTextRendering(mut env: JNIEnv, _class: JClass, ptr: jlong
         _ => return,
     };
 
-    opt.text_rendering = t;
+    opt.set_text_rendering(t);
 }
 #[jni_fn("me.aloic.ResvgJNI")]
 pub fn RenderOptionsSetImageRendering(mut env: JNIEnv, _class: JClass, ptr: jlong, render_type: jint) {
@@ -142,7 +142,7 @@ pub fn RenderOptionsSetImageRendering(mut env: JNIEnv, _class: JClass, ptr: jlon
         _ => return,
     };
 
-    opt.image_rendering = t;
+    opt.set_image_rendering(t);
 }
 
 #[jni_fn("me.aloic.ResvgJNI")]
@@ -150,21 +150,32 @@ pub fn RenderOptionsDestroy(_env: JNIEnv, _class: JClass, ptr: jlong) {
     destory!(RenderOptions, ptr);
 }
 
-#[jni_fn("me.aloic.ResvgJNI")]
-pub fn convertToPNG(
+fn convert(
     mut env: JNIEnv,
-    _class: JClass,
     options_ptr: jlong,
-    svg_data: JString, // SVG 数据（强制必须UTF-8）
+    svg_data: JString,
     scale: jfloat,
+    render_type: render::RenderType,
 ) -> jbyteArray {
     let mut envc = unsafe { env.unsafe_clone() };
     match std::panic::catch_unwind(move || {
         let scale = if scale <= 0f32 { 1.0 } else { scale };
         let opt = load_ptr!(env, RenderOptions, options_ptr, std::ptr::null_mut());
-        let svg_content: String = trythrow!(env, env.get_string(&svg_data), std::ptr::null_mut()).into();
-        let png_data = trythrow!(env, render::render(&svg_content, &opt.get_options(), scale, render::RenderType::Png), std::ptr::null_mut());
-        trythrow!(env, env.byte_array_from_slice(&png_data).map(|d| d.as_jarray_raw()), std::ptr::null_mut())
+        let svg_content: String =
+            trythrow!(env, env.get_string(&svg_data), std::ptr::null_mut()).into();
+        let encoded = trythrow!(
+            env,
+            opt.with_options(|usvg_opt| {
+                render::render(&svg_content, usvg_opt, scale, render_type)
+            }),
+            std::ptr::null_mut()
+        );
+        trythrow!(
+            env,
+            env.byte_array_from_slice(&encoded)
+                .map(|d| d.as_jarray_raw()),
+            std::ptr::null_mut()
+        )
     }) {
         Ok(r) => r,
         Err(_) => {
@@ -175,25 +186,35 @@ pub fn convertToPNG(
 }
 
 #[jni_fn("me.aloic.ResvgJNI")]
-pub fn convertToJPG(
-    mut env: JNIEnv,
+pub fn convertToPNG(
+    env: JNIEnv,
     _class: JClass,
     options_ptr: jlong,
-    svg_data: JString, // SVG 数据（强制必须UTF-8）
+    svg_data: JString,
     scale: jfloat,
 ) -> jbyteArray {
-    let mut envc = unsafe { env.unsafe_clone() };
-    match std::panic::catch_unwind(move || {
-        let scale = if scale <= 0f32 { 1.0 } else { scale };
-        let opt = load_ptr!(env, RenderOptions, options_ptr, std::ptr::null_mut());
-        let svg_content: String = trythrow!(env, env.get_string(&svg_data), std::ptr::null_mut()).into();
-        let png_data = trythrow!(env, render::render(&svg_content, &opt.get_options(), scale, render::RenderType::Jpeg), std::ptr::null_mut());
-        trythrow!(env, env.byte_array_from_slice(&png_data).map(|d| d.as_jarray_raw()), std::ptr::null_mut())
-    }) {
-        Ok(r) => r,
-        Err(_) => {
-            let _ = envc.throw("Unexpected Error");
-            std::ptr::null_mut()
-        }
-    }
+    convert(env, options_ptr, svg_data, scale, render::RenderType::Png)
+}
+
+#[jni_fn("me.aloic.ResvgJNI")]
+pub fn convertToJPG(
+    env: JNIEnv,
+    _class: JClass,
+    options_ptr: jlong,
+    svg_data: JString,
+    scale: jfloat,
+    quality: jfloat,
+    background_rgb: jint,
+) -> jbyteArray {
+    let params = render::JpegParams::new(
+        render::jpeg_quality_from_f32(quality),
+        render::background_from_rgb(background_rgb as u32),
+    );
+    convert(
+        env,
+        options_ptr,
+        svg_data,
+        scale,
+        render::RenderType::Jpeg(params),
+    )
 }

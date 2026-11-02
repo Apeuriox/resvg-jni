@@ -1,0 +1,7 @@
+# Local Windows library
+cargo build --release
+# target/release/resvg_jni.dll -> src/main/resources/lib/resvg_jni.dll
+
+# CI
+# .github/workflows/package.yml builds libresvg_jni.so and resvg_jni.dll,
+# packs both into the Maven jar, and commits the libraries.

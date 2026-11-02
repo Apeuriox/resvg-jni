@@ -68,9 +68,15 @@ public class ResvgJNI {
     private static native void RenderOptionsLoadFontsDir(long ptr, String fontDirPath);
     private static native void RenderOptionsDestroy(long ptr);
     private static native byte[] convertToPNG(long optionsPtr, String svgData, float scale);
-    private static native byte[] convertToJPG(long optionsPtr, String svgData, float scale);
+    /// quality is 1–100. backgroundRgb is opaque 0xRRGGBB. JPEG has no alpha channel.
+    private static native byte[] convertToJPG(long optionsPtr, String svgData, float scale, float quality, int backgroundRgb);
 
     public static class Renderer {
+        /** JPEG quality used when the caller does not pass one. Range 1–100. */
+        public static final float DEFAULT_JPEG_QUALITY = 90f;
+        /** Opaque JPEG background, packed 0xRRGGBB. */
+        public static final int DEFAULT_JPEG_BACKGROUND = 0xFFFFFF;
+
         private RenderOptions options;
 
         public Renderer(RenderOptions options) {
@@ -104,7 +110,15 @@ public class ResvgJNI {
         }
 
         public byte[] RenderJpg(String svgData, float scale) {
-            return convertToJPG(options.GetContext(), svgData, scale);
+            return RenderJpg(svgData, scale, DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_BACKGROUND);
+        }
+
+        public byte[] RenderJpg(String svgData, float scale, float quality) {
+            return RenderJpg(svgData, scale, quality, DEFAULT_JPEG_BACKGROUND);
+        }
+
+        public byte[] RenderJpg(String svgData, float scale, float quality, int backgroundRgb) {
+            return convertToJPG(options.GetContext(), svgData, scale, quality, backgroundRgb);
         }
 
         public byte[] RenderJpg(String svgData) {
@@ -116,12 +130,32 @@ public class ResvgJNI {
             return RenderJpg(svgData, scale);
         }
 
+        public byte[] RenderJpg(InputStream svgInputStream, float scale, float quality) throws IOException {
+            String svgData = readInputStreamToString(svgInputStream);
+            return RenderJpg(svgData, scale, quality);
+        }
+
+        public byte[] RenderJpg(InputStream svgInputStream, float scale, float quality, int backgroundRgb) throws IOException {
+            String svgData = readInputStreamToString(svgInputStream);
+            return RenderJpg(svgData, scale, quality, backgroundRgb);
+        }
+
         public byte[] RenderJpg(InputStream svgInputStream) throws IOException {
             return RenderJpg(svgInputStream, 1.0f);
         }
 
         public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream, float scale) throws IOException {
             byte[] JpgData = RenderJpg(svgInputStream, scale);
+            JpgOutputStream.write(JpgData);
+        }
+
+        public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream, float scale, float quality) throws IOException {
+            byte[] JpgData = RenderJpg(svgInputStream, scale, quality);
+            JpgOutputStream.write(JpgData);
+        }
+
+        public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream, float scale, float quality, int backgroundRgb) throws IOException {
+            byte[] JpgData = RenderJpg(svgInputStream, scale, quality, backgroundRgb);
             JpgOutputStream.write(JpgData);
         }
 
