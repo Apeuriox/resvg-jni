@@ -7,10 +7,43 @@ pub const DEFAULT_JPEG_QUALITY: u8 = 90;
 /// Opaque background used when the caller does not pass one. JPEG has no alpha.
 pub const DEFAULT_JPEG_BACKGROUND: [u8; 3] = [255, 255, 255];
 
+/// Chrominance subsampling for JPEG. The default is 4:2:0.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum JpegSubsampling {
+    /// 4:2:0. `turbojpeg::Subsamp::Sub2x2`.
+    Yuv420,
+    /// 4:4:4. `turbojpeg::Subsamp::None`.
+    Yuv444,
+}
+
+impl Default for JpegSubsampling {
+    fn default() -> Self {
+        Self::Yuv420
+    }
+}
+
+impl JpegSubsampling {
+    /// `1` is 4:4:4. Every other value, including `0`, is 4:2:0.
+    pub fn from_jni(value: i32) -> Self {
+        match value {
+            1 => Self::Yuv444,
+            _ => Self::Yuv420,
+        }
+    }
+
+    fn turbo(self) -> turbojpeg::Subsamp {
+        match self {
+            Self::Yuv420 => turbojpeg::Subsamp::Sub2x2,
+            Self::Yuv444 => turbojpeg::Subsamp::None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct JpegParams {
     pub quality: u8,
     pub background: [u8; 3],
+    pub subsampling: JpegSubsampling,
 }
 
 impl Default for JpegParams {
@@ -18,6 +51,7 @@ impl Default for JpegParams {
         Self {
             quality: DEFAULT_JPEG_QUALITY,
             background: DEFAULT_JPEG_BACKGROUND,
+            subsampling: JpegSubsampling::default(),
         }
     }
 }
@@ -27,7 +61,13 @@ impl JpegParams {
         Self {
             quality: quality.clamp(1, 100),
             background,
+            subsampling: JpegSubsampling::default(),
         }
+    }
+
+    pub fn with_subsampling(mut self, subsampling: JpegSubsampling) -> Self {
+        self.subsampling = subsampling;
+        self
     }
 }
 
@@ -82,20 +122,24 @@ pub fn render(
 }
 
 /// Un-premultiply tiny-skia's pixels, composite onto an opaque background, then
-/// encode. Both platforms use `image`'s JPEG encoder, whose frame header writes
-/// horizontal and vertical sampling factors of 1 (4:4:4).
+/// encode with turbojpeg. The same path runs on Windows and Linux. Turbojpeg
+/// drops alpha, so premultiplied pixels must not be passed in directly.
 pub fn encode_jpg(map: &Pixmap, params: JpegParams) -> anyhow::Result<Vec<u8>> {
     let rgb = unpremultiply_and_composite(map, params.background);
-    let mut writer = std::io::Cursor::new(Vec::new());
-    let mut encoder =
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, params.quality);
-    encoder.encode(
-        &rgb,
-        map.width(),
-        map.height(),
-        image::ExtendedColorType::Rgb8,
+    let width = map.width() as usize;
+    let height = map.height() as usize;
+    let jpeg = turbojpeg::compress(
+        turbojpeg::Image {
+            pixels: rgb.as_slice(),
+            width,
+            pitch: width * turbojpeg::PixelFormat::RGB.size(),
+            height,
+            format: turbojpeg::PixelFormat::RGB,
+        },
+        i32::from(params.quality),
+        params.subsampling.turbo(),
     )?;
-    Ok(writer.into_inner())
+    Ok(jpeg.as_ref().to_vec())
 }
 
 fn unpremultiply_and_composite(pixmap: &Pixmap, background: [u8; 3]) -> Vec<u8> {
@@ -176,16 +220,38 @@ mod tests {
     }
 
     #[test]
-    fn jpeg_is_444_at_quality_90() {
-        let pixmap = Pixmap::new(8, 8).unwrap();
-        let jpeg = encode_jpg(&pixmap, JpegParams::default()).unwrap();
-        assert_eq!(jpeg_sampling_factors(&jpeg), vec![0x11, 0x11, 0x11]);
-        assert_eq!(jpeg_luma_quant_first(&jpeg), 3);
+    fn jpeg_default_is_420_and_lower_quality_uses_a_larger_quant_step() {
+        let pixmap = Pixmap::new(16, 16).unwrap();
+        let default_jpeg = encode_jpg(&pixmap, JpegParams::default()).unwrap();
+        assert_eq!(jpeg_sampling_factors(&default_jpeg), vec![0x22, 0x11, 0x11]);
+        assert_eq!(
+            JpegSubsampling::from_jni(0),
+            JpegSubsampling::Yuv420
+        );
+        assert_eq!(
+            JpegSubsampling::from_jni(2),
+            JpegSubsampling::Yuv420
+        );
+
+        let sharp = encode_jpg(
+            &pixmap,
+            JpegParams::default().with_subsampling(JpegSubsampling::from_jni(1)),
+        )
+        .unwrap();
+        assert_eq!(jpeg_sampling_factors(&sharp), vec![0x11, 0x11, 0x11]);
+
+        let coarse = encode_jpg(&pixmap, JpegParams::new(40, DEFAULT_JPEG_BACKGROUND)).unwrap();
+        assert!(
+            jpeg_luma_quant_first(&coarse) > jpeg_luma_quant_first(&default_jpeg),
+            "quality 40 step {} vs quality 90 step {}",
+            jpeg_luma_quant_first(&coarse),
+            jpeg_luma_quant_first(&default_jpeg)
+        );
     }
 
     #[test]
     fn custom_background_and_quality_are_honored() {
-        let mut pixmap = Pixmap::new(8, 8).unwrap();
+        let mut pixmap = Pixmap::new(16, 16).unwrap();
         fill(
             &mut pixmap,
             PremultipliedColorU8::from_rgba(0, 0, 0, 0).unwrap(),
@@ -198,7 +264,13 @@ mod tests {
         let image = image::load_from_memory(&jpeg).unwrap().to_rgb8();
         let pixel = image.get_pixel(4, 4).0;
         assert!(pixel[2] > pixel[0] && pixel[2] > pixel[1]);
-        assert_eq!(jpeg_luma_quant_first(&jpeg), 8);
+        assert_eq!(jpeg_sampling_factors(&jpeg), vec![0x22, 0x11, 0x11]);
+        let finer = encode_jpg(
+            &pixmap,
+            JpegParams::new(90, background_from_rgb(0x2040ff)),
+        )
+        .unwrap();
+        assert!(jpeg_luma_quant_first(&jpeg) > jpeg_luma_quant_first(&finer));
     }
 
     #[test]
@@ -211,8 +283,21 @@ mod tests {
             .with_options(|opt| render(svg, opt, 2.0, RenderType::Png))
             .unwrap();
         let jpeg = options
+            .with_options(|opt| {
+                render(
+                    svg,
+                    opt,
+                    2.0,
+                    RenderType::Jpeg(
+                        JpegParams::default().with_subsampling(JpegSubsampling::Yuv444),
+                    ),
+                )
+            })
+            .unwrap();
+        let default_jpeg = options
             .with_options(|opt| render(svg, opt, 2.0, RenderType::Jpeg(JpegParams::default())))
             .unwrap();
+        assert_eq!(jpeg_sampling_factors(&default_jpeg), vec![0x22, 0x11, 0x11]);
 
         let png_image = image::load_from_memory(&png).unwrap().to_rgba8();
         let jpeg_image = image::load_from_memory(&jpeg).unwrap().to_rgb8();

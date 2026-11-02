@@ -12,4 +12,5 @@ anyhow = "1.0.96"
 resvg = { version = "0.49.0" }
 jni = {version = "0.21.1"}
 jni_fn = "0.1.2"
+turbojpeg = "1.2.2"
 image = "0.25.5"

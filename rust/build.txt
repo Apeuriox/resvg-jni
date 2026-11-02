@@ -1,4 +1,6 @@
-# Local Windows library
+# Local Windows library. NASM and CMake must be on PATH. The build statically
+# links the bundled libjpeg-turbo 3.0.1. Do not set TURBOJPEG_DYNAMIC.
+# CMake 4 needs CMAKE_POLICY_VERSION_MINIMUM=3.5 for this libjpeg-turbo.
 cargo build --release
 # target/release/resvg_jni.dll -> src/main/resources/lib/resvg_jni.dll
 

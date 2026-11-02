@@ -21,10 +21,54 @@ jobs:
           - os: windows-latest
             name: windows
             library: resvg_jni.dll
+    env:
+      # libjpeg-turbo 3.0.1 declares a CMake minimum older than 3.5.
+      # CMake 4 refuses that unless this floor is set. Linking stays static.
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NASM
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+          command -v nasm
+          nasm -v
+
+      - name: Install NASM
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: NASM is on PATH
+        shell: bash
+        run: command -v nasm && nasm -v
+
+      - name: Ensure CMake and a C compiler
+        shell: bash
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              sudo apt-get update
+              sudo apt-get install -y cmake build-essential
+            else
+              echo "CMake is missing on the Windows runner"
+              exit 1
+            fi
+          fi
+          command -v cmake
+          cmake --version
+          if [ "$RUNNER_OS" = "Linux" ] && ! command -v gcc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential
+            command -v gcc
+          fi
+
+      - name: Test default JPEG is 4:2:0
+        working-directory: rust
+        run: cargo test --locked --lib -- jpeg_default_is_420 transparent_pixels half_red custom_background
 
       - name: Build release library
         working-directory: rust

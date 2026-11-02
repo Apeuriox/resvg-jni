@@ -68,14 +68,18 @@ public class ResvgJNI {
     private static native void RenderOptionsLoadFontsDir(long ptr, String fontDirPath);
     private static native void RenderOptionsDestroy(long ptr);
     private static native byte[] convertToPNG(long optionsPtr, String svgData, float scale);
-    /// quality is 1–100. backgroundRgb is opaque 0xRRGGBB. JPEG has no alpha channel.
-    private static native byte[] convertToJPG(long optionsPtr, String svgData, float scale, float quality, int backgroundRgb);
+    /// quality is 1–100. backgroundRgb is opaque 0xRRGGBB. subsampling is JPEG_420 or JPEG_444.
+    private static native byte[] convertToJPG(long optionsPtr, String svgData, float scale, float quality, int backgroundRgb, int subsampling);
 
     public static class Renderer {
         /** JPEG quality used when the caller does not pass one. Range 1–100. */
         public static final float DEFAULT_JPEG_QUALITY = 90f;
         /** Opaque JPEG background, packed 0xRRGGBB. */
         public static final int DEFAULT_JPEG_BACKGROUND = 0xFFFFFF;
+        /** 4:2:0 chroma subsampling. This is the default. */
+        public static final int JPEG_420 = 0;
+        /** 4:4:4 chroma subsampling. Callers must pass this explicitly. */
+        public static final int JPEG_444 = 1;
 
         private RenderOptions options;
 
@@ -110,15 +114,19 @@ public class ResvgJNI {
         }
 
         public byte[] RenderJpg(String svgData, float scale) {
-            return RenderJpg(svgData, scale, DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_BACKGROUND);
+            return RenderJpg(svgData, scale, DEFAULT_JPEG_QUALITY, DEFAULT_JPEG_BACKGROUND, JPEG_420);
         }
 
         public byte[] RenderJpg(String svgData, float scale, float quality) {
-            return RenderJpg(svgData, scale, quality, DEFAULT_JPEG_BACKGROUND);
+            return RenderJpg(svgData, scale, quality, DEFAULT_JPEG_BACKGROUND, JPEG_420);
         }
 
         public byte[] RenderJpg(String svgData, float scale, float quality, int backgroundRgb) {
-            return convertToJPG(options.GetContext(), svgData, scale, quality, backgroundRgb);
+            return RenderJpg(svgData, scale, quality, backgroundRgb, JPEG_420);
+        }
+
+        public byte[] RenderJpg(String svgData, float scale, float quality, int backgroundRgb, int subsampling) {
+            return convertToJPG(options.GetContext(), svgData, scale, quality, backgroundRgb, subsampling);
         }
 
         public byte[] RenderJpg(String svgData) {
@@ -140,6 +148,11 @@ public class ResvgJNI {
             return RenderJpg(svgData, scale, quality, backgroundRgb);
         }
 
+        public byte[] RenderJpg(InputStream svgInputStream, float scale, float quality, int backgroundRgb, int subsampling) throws IOException {
+            String svgData = readInputStreamToString(svgInputStream);
+            return RenderJpg(svgData, scale, quality, backgroundRgb, subsampling);
+        }
+
         public byte[] RenderJpg(InputStream svgInputStream) throws IOException {
             return RenderJpg(svgInputStream, 1.0f);
         }
@@ -156,6 +169,11 @@ public class ResvgJNI {
 
         public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream, float scale, float quality, int backgroundRgb) throws IOException {
             byte[] JpgData = RenderJpg(svgInputStream, scale, quality, backgroundRgb);
+            JpgOutputStream.write(JpgData);
+        }
+
+        public void RenderJpg(InputStream svgInputStream, OutputStream JpgOutputStream, float scale, float quality, int backgroundRgb, int subsampling) throws IOException {
+            byte[] JpgData = RenderJpg(svgInputStream, scale, quality, backgroundRgb, subsampling);
             JpgOutputStream.write(JpgData);
         }
 

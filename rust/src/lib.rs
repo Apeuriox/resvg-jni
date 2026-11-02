@@ -205,11 +205,13 @@ pub fn convertToJPG(
     scale: jfloat,
     quality: jfloat,
     background_rgb: jint,
+    subsampling: jint,
 ) -> jbyteArray {
     let params = render::JpegParams::new(
         render::jpeg_quality_from_f32(quality),
         render::background_from_rgb(background_rgb as u32),
-    );
+    )
+    .with_subsampling(render::JpegSubsampling::from_jni(subsampling));
     convert(
         env,
         options_ptr,
